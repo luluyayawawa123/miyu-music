@@ -14,11 +14,112 @@ const SYSTEM_PASSWORD = 'miyu2024';
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// --- 自定义音频流媒体路由 (必须在静态文件服务之前) ---
+// 这个路由优化了MP3等格式的流媒体传输，解决慢网速下缓冲时间过长的问题
+app.get('/music/:filename', (req, res) => {
+    try {
+        const filename = decodeURIComponent(req.params.filename);
+        const filePath = path.join(__dirname, 'music', filename);
+
+        // 检查文件是否存在
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: '音频文件不存在' });
+        }
+
+        const stat = fs.statSync(filePath);
+        const fileSize = stat.size;
+        const ext = path.extname(filename).toLowerCase();
+
+        // 根据文件扩展名设置正确的 MIME 类型
+        const mimeTypes = {
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.ogg': 'audio/ogg',
+            '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac',
+            '.flac': 'audio/flac',
+            '.webm': 'audio/webm'
+        };
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+        // 处理 Range 请求（分块传输）
+        const range = req.headers.range;
+
+        if (range) {
+            // 解析 Range 头
+            const parts = range.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            // 使用 1MB 作为默认 chunk 大小，优化流媒体传输
+            const CHUNK_SIZE = 1024 * 1024; // 1MB
+            const end = parts[1]
+                ? parseInt(parts[1], 10)
+                : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
+
+            // 验证 Range 有效性
+            if (start >= fileSize || end >= fileSize || start > end) {
+                res.status(416).set({
+                    'Content-Range': `bytes */${fileSize}`
+                });
+                return res.end();
+            }
+
+            const chunkSize = end - start + 1;
+
+            // 设置响应头
+            res.status(206).set({
+                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': chunkSize,
+                'Content-Type': contentType,
+                'Cache-Control': 'public, max-age=31536000', // 缓存1年
+                'X-Content-Duration': stat.size // 帮助某些播放器快速获取时长
+            });
+
+            // 创建文件流并传输
+            const stream = fs.createReadStream(filePath, { start, end });
+            stream.pipe(res);
+
+            // 错误处理
+            stream.on('error', (err) => {
+                console.error(`流媒体传输错误 (${filename}):`, err);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: '流媒体传输失败' });
+                }
+            });
+
+        } else {
+            // 没有 Range 请求，返回完整文件（但仍告知客户端支持 Range）
+            res.set({
+                'Content-Length': fileSize,
+                'Content-Type': contentType,
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'public, max-age=31536000'
+            });
+
+            const stream = fs.createReadStream(filePath);
+            stream.pipe(res);
+
+            stream.on('error', (err) => {
+                console.error(`文件传输错误 (${filename}):`, err);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: '文件传输失败' });
+                }
+            });
+        }
+    } catch (error) {
+        console.error('音频流处理错误:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ error: '服务器内部错误' });
+        }
+    }
+});
+
 // Serve static files from 'public' directory (or root for html, css, js)
 app.use(express.static(path.join(__dirname))); // Serves index.html from root
 app.use('/css', express.static(path.join(__dirname, 'css')));
 app.use('/js', express.static(path.join(__dirname, 'js')));
-app.use('/music', express.static(path.join(__dirname, 'music'))); // Serve music files directly
+// 注意：/music 的静态文件服务被上面的自定义路由覆盖，但保留作为后备
+app.use('/music', express.static(path.join(__dirname, 'music')));
 
 // Ensure music directory exists
 // Ensure music directory exists
@@ -95,43 +196,76 @@ app.get('/api/music', async (req, res) => {
     try {
         const files = await fs.promises.readdir(musicDir, { encoding: 'utf8' });
 
-        // Filter for audio files
-        let musicFiles = files.filter(file => {
-            return file.endsWith('.mp3') || file.endsWith('.wav') || file.endsWith('.ogg') || file.endsWith('.m4a');
-        });
+        // Filter for audio files and get their stats (mtime)
+        const musicFilesWithStats = await Promise.all(
+            files
+                .filter(file => {
+                    const ext = path.extname(file).toLowerCase();
+                    return ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'].includes(ext);
+                })
+                .map(async file => {
+                    const filePath = path.join(musicDir, file);
+                    try {
+                        const stats = await fs.promises.stat(filePath);
+                        return { name: file, mtime: stats.mtimeMs };
+                    } catch (e) {
+                        return { name: file, mtime: 0 };
+                    }
+                })
+        );
+
+        let sortedFiles = musicFilesWithStats;
 
         // Try to read playlist order
         try {
             if (fs.existsSync(playlistFile)) {
-                const playlistOrder = JSON.parse(await fs.promises.readFile(playlistFile, 'utf8'));
+                const playlistData = await fs.promises.readFile(playlistFile, 'utf8');
+                // Basic check for empty file
+                if (playlistData.trim()) {
+                    const playlistOrder = JSON.parse(playlistData);
 
-                // Sort musicFiles based on playlistOrder
-                // 1. Create a map for O(1) lookup of index
-                const orderMap = new Map(playlistOrder.map((file, index) => [file, index]));
+                    // Create a map for O(1) lookup of index
+                    const orderMap = new Map(playlistOrder.map((file, index) => [file, index]));
 
-                // 2. Sort files: files in orderMap come first sorted by index, others come after
-                musicFiles.sort((a, b) => {
-                    // Files NOT in the orderMap (new files) get index -1 to appear at the top
-                    const indexA = orderMap.has(a) ? orderMap.get(a) : -1;
-                    const indexB = orderMap.has(b) ? orderMap.get(b) : -1;
+                    // Sort:
+                    // 1. Files not in playlist (index -1) come FIRST
+                    // 2. Files in playlist (index >= 0) come AFTER, sorted by index
+                    // 3. If both are new (index -1), sort by mtime DESC (newest first)
 
-                    // If both are new files (index -1), keep original order (or sort by name/time if needed)
-                    if (indexA === -1 && indexB === -1) {
-                        return 0;
-                    }
+                    sortedFiles.sort((a, b) => {
+                        const indexA = orderMap.has(a.name) ? orderMap.get(a.name) : -1;
+                        const indexB = orderMap.has(b.name) ? orderMap.get(b.name) : -1;
 
-                    return indexA - indexB;
-                });
+                        if (indexA === -1 && indexB === -1) {
+                            // Both are new, sort by time DESC
+                            return b.mtime - a.mtime;
+                        }
+
+                        // If one is new (-1) and one is old (>=0), we want New to be First.
+                        // Standard integer sort: -1 comes before 0. So no special logic needed besides subtraction.
+                        // -1 - 0 = -1 (New before Old)
+                        // 0 - -1 = 1 (Old after New)
+                        return indexA - indexB;
+                    });
+                }
+            } else {
+                // No playlist file: Sort by time DESC (Newest uploads first) as default
+                sortedFiles.sort((a, b) => b.mtime - a.mtime);
             }
         } catch (e) {
             console.error("Error reading playlist order:", e);
-            // Continue with default order if reading fails
+            // Fallback: Sort by time DESC
+            sortedFiles.sort((a, b) => b.mtime - a.mtime);
         }
 
-        // Process each file to get metadata
+        // Process each file to get metadata (using sorted list)
+        // Extract names from sorted objects
+        const musicFiles = sortedFiles.map(f => f.name);
+
         const tracksWithMetadata = await Promise.all(musicFiles.map(async (file) => {
             const filePath = path.join(musicDir, file);
             try {
+                // Use parseFile on the path
                 const metadata = await mm.parseFile(filePath);
                 const hasCover = metadata.common.picture && metadata.common.picture.length > 0;
 
@@ -142,7 +276,7 @@ app.get('/api/music', async (req, res) => {
                     artist: metadata.common.artist || '',
                     album: metadata.common.album || '',
                     hasCover: hasCover,
-                    coverId: hasCover ? file : null // Use filename as cover ID if cover exists
+                    coverId: hasCover ? file : null
                 };
             } catch (error) {
                 console.error(`Error parsing metadata for ${file}:`, error);
