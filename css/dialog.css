@@ -1,0 +1,222 @@
+﻿/* 密码验证对话框样式 */
+.password-dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(5px);
+    animation: fadeIn 0.3s ease;
+}
+
+.password-dialog {
+    background: linear-gradient(135deg, rgba(40, 40, 80, 0.9), rgba(30, 30, 60, 0.95));
+    border-radius: 15px;
+    padding: 25px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), 
+                0 0 15px rgba(255, 255, 255, 0.1),
+                0 0 30px rgba(88, 57, 206, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.password-dialog h3 {
+    color: white;
+    margin-bottom: 15px;
+    text-align: center;
+    font-size: 1.4rem;
+    font-weight: 600;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.password-dialog p {
+    color: rgb(255, 70, 70);
+    margin-bottom: 20px;
+    text-align: center;
+    font-size: 0.95rem;
+}
+
+.password-dialog input[type="password"] {
+    width: 100%;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background-color: rgba(20, 20, 40, 0.8);
+    color: white;
+    font-size: 1rem;
+    outline: none;
+    transition: all 0.3s ease;
+}
+
+.password-dialog input[type="password"]:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 15px rgba(0, 230, 195, 0.3);
+}
+
+.dialog-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 15px;
+}
+
+.dialog-buttons button {
+    padding: 10px 15px;
+    border-radius: 8px;
+    border: none;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+#cancel-btn {
+    background-color: rgba(70, 70, 90, 0.6);
+    color: white;
+}
+
+#confirm-btn {
+    background-color: var(--accent-color);
+    color: rgba(0, 0, 50, 0.9);
+    font-weight: 600;
+}
+
+#cancel-btn:hover {
+    background-color: rgba(90, 90, 120, 0.8);
+    transform: translateY(-2px);
+}
+
+#confirm-btn:hover {
+    background-color: rgb(20, 255, 220);
+    box-shadow: 0 5px 15px rgba(0, 230, 195, 0.4);
+    transform: translateY(-2px);
+}
+
+#cancel-btn:active, #confirm-btn:active {
+    transform: translateY(1px);
+}
+
+/* 进度条样式 */
+.progress-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(5px);
+    animation: fadeIn 0.3s ease;
+}
+
+.progress-container {
+    background: linear-gradient(135deg, rgba(40, 40, 80, 0.9), rgba(30, 30, 60, 0.95));
+    border-radius: 15px;
+    padding: 25px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), 
+                0 0 15px rgba(255, 255, 255, 0.1),
+                0 0 30px rgba(88, 57, 206, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.progress-container h3 {
+    color: white;
+    margin-bottom: 15px;
+    text-align: center;
+    font-size: 1.4rem;
+    font-weight: 600;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.progress-bar-container {
+    width: 100%;
+    height: 15px;
+    background-color: rgba(20, 20, 40, 0.8);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-color), var(--accent-color-alt));
+    border-radius: 10px;
+    transition: width 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 200%;
+    height: 100%;
+    background: linear-gradient(
+        90deg, 
+        transparent, 
+        rgba(255, 255, 255, 0.2), 
+        transparent
+    );
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.progress-status {
+    color: rgb(255, 70, 70);
+    text-align: center;
+    font-size: 0.95rem;
+    margin-top: 10px;
+}
+
+/* 删除按钮样式已移至 style.css 统一定义 */
+
+/* 动画关键帧 */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes popIn {
+    from { 
+        opacity: 0; 
+        transform: scale(0.8);
+    }
+    to { 
+        opacity: 1; 
+        transform: scale(1);
+    }
+}
+
+/* 响应式调整 */
+@media (max-width: 450px) {
+    .password-dialog, .progress-container {
+        width: 95%;
+        padding: 20px;
+    }
+    
+    .password-dialog h3, .progress-container h3 {
+        font-size: 1.2rem;
+    }
+} 
+
+

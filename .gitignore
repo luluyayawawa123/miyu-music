@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Music directory (Auto-created by server)
+music/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea/
+.vscode/

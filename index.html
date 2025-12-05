@@ -1,0 +1,115 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>葱豆的音乐网站</title>
+    <link rel="icon" href="favicon.png" type="image/png">
+    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/bootstrap-icons/1.11.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/visualizer.css">
+    <link rel="stylesheet" href="css/dialog.css">
+    <link rel="stylesheet" href="css/player.css">
+    <link rel="stylesheet" href="css/info-dialog.css">
+</head>
+
+<body>
+    <div class="content-wrapper">
+        <header>
+            <h1>葱豆的音乐作品</h1>
+        </header>
+
+        <main>
+            <section id="player-section">
+                <div class="player-card">
+                    <div class="now-playing">
+                        <div class="album-art">
+                            <i class="bi bi-music-note-beamed default-album-icon"></i>
+                        </div>
+                        <div class="track-info-display">
+                            <div class="now-playing-text">正在播放</div>
+                            <div class="now-playing-title">选择一首歌曲开始播放</div>
+                        </div>
+                    </div>
+
+                    <div class="player-controls">
+                        <!-- 隐藏的原生audio元素 -->
+                        <audio id="audio-player"></audio>
+
+                        <!-- 自定义播放器UI -->
+                        <div class="custom-player">
+                            <!-- 进度条 -->
+                            <div class="progress-wrapper">
+                                <span class="time-current">0:00</span>
+                                <div class="progress-bar-track" id="progress-track">
+                                    <div class="progress-bar-buffer" id="progress-buffer"></div>
+                                    <div class="progress-bar-fill" id="progress-fill"></div>
+                                    <div class="progress-bar-thumb" id="progress-thumb"></div>
+                                </div>
+                                <span class="time-total">0:00</span>
+                            </div>
+
+                            <!-- 控制按钮 -->
+                            <div class="main-controls">
+                                <button id="shuffle-btn" class="control-btn" title="随机播放">
+                                    <i class="bi bi-shuffle"></i>
+                                </button>
+                                <button id="prev-btn" class="control-btn" title="上一曲">
+                                    <i class="bi bi-skip-start-fill"></i>
+                                </button>
+                                <button id="play-btn" class="control-btn play-btn" title="播放">
+                                    <i class="bi bi-play-fill"></i>
+                                </button>
+                                <button id="next-btn" class="control-btn" title="下一曲">
+                                    <i class="bi bi-skip-end-fill"></i>
+                                </button>
+                                <button id="repeat-btn" class="control-btn" title="列表循环">
+                                    <i class="bi bi-arrow-repeat"></i>
+                                </button>
+                            </div>
+
+                            <!-- 音量控制 -->
+                            <div class="volume-wrapper">
+                                <button id="volume-btn" class="control-btn volume-btn" title="静音">
+                                    <i class="bi bi-volume-up-fill"></i>
+                                </button>
+                                <div class="volume-slider-track" id="volume-track">
+                                    <div class="volume-slider-fill" id="volume-fill"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="upload-container">
+                        <label for="music-file-input" class="upload-button">
+                            <i class="bi bi-music-note-beamed"></i> 添加音乐
+                        </label>
+                        <input type="file" id="music-file-input" accept=".mp3,.wav,.ogg,.m4a" multiple>
+                    </div>
+                </div>
+            </section>
+
+            <section id="playlist-section">
+                <div class="playlist-card">
+                    <h2>播放列表</h2>
+                    <ul id="playlist-items">
+                        <!-- 音乐项会在这里动态添加 -->
+                    </ul>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2024 葱豆SAMA</p>
+        </footer>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script src="js/stars.js"></script>
+    <script src="js/audio-visualizer.js"></script>
+    <script src="js/custom-player.js"></script>
+    <script src="js/info-dialog.js"></script>
+</body>
+
+</html>

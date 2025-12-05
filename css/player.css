@@ -1,0 +1,215 @@
+﻿/* ===================================
+   自定义音频播放器样式
+   匹配深色玻璃拟态主题
+=================================== */
+
+/* 隐藏原生audio控件 */
+#audio-player {
+    display: none;
+}
+
+/* 自定义播放器容器 */
+.custom-player {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 100%;
+}
+
+/* === 进度条区域 === */
+.progress-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.time-current,
+.time-total {
+    font-size: 0.75rem;
+    color: var(--color-text-soft);
+    min-width: 36px;
+    font-variant-numeric: tabular-nums;
+}
+
+.time-current {
+    text-align: right;
+}
+
+.time-total {
+    text-align: left;
+}
+
+/* 进度条轨道 */
+.progress-bar-track {
+    flex: 1;
+    height: 6px;
+    background: var(--color-bg-item);
+    border-radius: 3px;
+    position: relative;
+    cursor: pointer;
+    transition: height 0.15s ease;
+}
+
+.progress-bar-track:hover {
+    height: 8px;
+}
+
+
+/* 缓冲进度条 */
+.progress-bar-buffer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* 进度条填充 */
+.progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+    border-radius: 3px;
+    position: relative;
+    transition: width 0.1s linear;
+}
+
+/* 进度条拖动点 */
+.progress-bar-thumb {
+    position: absolute;
+    top: 50%;
+    left: 0%;
+    width: 14px;
+    height: 14px;
+    background: white;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    cursor: grab;
+}
+
+.progress-bar-track:hover .progress-bar-thumb,
+.progress-bar-thumb.dragging {
+    opacity: 1;
+}
+
+.progress-bar-thumb.dragging {
+    cursor: grabbing;
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
+/* === 主控制按钮区域 === */
+.main-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+/* 播放按钮特殊样式 */
+.control-btn.play-btn {
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, var(--color-primary), #6366f1);
+    border-color: transparent;
+    color: white;
+}
+
+.control-btn.play-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4);
+}
+
+.control-btn.play-btn i {
+    font-size: 1.25rem;
+}
+
+/* === 音量控制区域 === */
+.volume-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.volume-btn {
+    width: 32px;
+    height: 32px;
+}
+
+.volume-btn i {
+    font-size: 0.9rem;
+}
+
+/* 音量滑块轨道 */
+.volume-slider-track {
+    width: 80px;
+    height: 4px;
+    background: var(--color-bg-item);
+    border-radius: 2px;
+    position: relative;
+    cursor: pointer;
+    transition: height 0.15s ease;
+}
+
+.volume-slider-track:hover {
+    height: 6px;
+}
+
+/* 音量滑块填充 */
+.volume-slider-fill {
+    height: 100%;
+    width: 100%;
+    background: var(--color-text-soft);
+    border-radius: 2px;
+    transition: width 0.1s linear;
+}
+
+/* === 响应式调整 === */
+@media (max-width: 767px) {
+    .volume-wrapper {
+        display: none;
+    }
+
+    .main-controls {
+        gap: 0.375rem;
+    }
+
+    .control-btn.play-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    .time-current,
+    .time-total {
+        font-size: 0.7rem;
+        min-width: 32px;
+    }
+}
+
+/* === 拖拽排序样式 === */
+#playlist-items li {
+    transition: transform 0.2s ease, background-color 0.2s ease;
+    cursor: grab;
+    /* 提示可拖拽 */
+}
+
+#playlist-items li.dragging {
+    opacity: 0.5;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px dashed rgba(255, 255, 255, 0.3);
+    cursor: grabbing;
+}
+
+#playlist-items li.drag-over {
+    border-top: 2px solid var(--color-primary);
+    /* 指示插入位置 */
+    transform: translateY(2px);
+    /* 视觉上的挤压效果 */
+}
