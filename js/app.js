@@ -494,12 +494,71 @@
         });
     }
 
+    // 显示/隐藏加载提示
+    function showLoadingState(show, message = '加载中...') {
+        let loadingOverlay = document.querySelector('.audio-loading-overlay');
+
+        if (show) {
+            if (!loadingOverlay) {
+                loadingOverlay = document.createElement('div');
+                loadingOverlay.className = 'audio-loading-overlay';
+                loadingOverlay.innerHTML = `
+                    <div class="loading-spinner"></div>
+                    <span class="loading-text">${message}</span>
+                `;
+                document.querySelector('.player-card').appendChild(loadingOverlay);
+            } else {
+                loadingOverlay.querySelector('.loading-text').textContent = message;
+                loadingOverlay.style.display = 'flex';
+            }
+        } else {
+            if (loadingOverlay) {
+                loadingOverlay.style.display = 'none';
+            }
+        }
+    }
+
     function playTrack(index) {
         if (index < 0 || index >= playlist.length) return;
 
         const track = playlist[index];
-        audioPlayer.src = track.url; // This URL now comes from the server
-        audioPlayer.play().catch(e => console.error("Error playing audio:", e));
+
+        // 显示加载状态
+        showLoadingState(true, '正在加载...');
+
+        // 移除之前的事件监听器（避免重复绑定）
+        const onCanPlay = () => {
+            showLoadingState(false);
+            audioPlayer.play().catch(e => {
+                console.error("Error playing audio:", e);
+                showLoadingState(false);
+            });
+            audioPlayer.removeEventListener('canplay', onCanPlay);
+            audioPlayer.removeEventListener('error', onError);
+            clearTimeout(loadingTimeout);
+        };
+
+        const onError = (e) => {
+            console.error("Error loading audio:", e);
+            showLoadingState(true, '加载失败，请重试');
+            setTimeout(() => showLoadingState(false), 2000);
+            audioPlayer.removeEventListener('canplay', onCanPlay);
+            audioPlayer.removeEventListener('error', onError);
+            clearTimeout(loadingTimeout);
+        };
+
+        // 超时处理：30秒后如果还没加载好，给用户提示
+        const loadingTimeout = setTimeout(() => {
+            showLoadingState(true, '网络较慢，请耐心等待...');
+        }, 5000);
+
+        // 绑定事件
+        audioPlayer.addEventListener('canplay', onCanPlay);
+        audioPlayer.addEventListener('error', onError);
+
+        // 设置音频源
+        audioPlayer.src = track.url;
+        audioPlayer.load(); // 显式加载
 
         // Update now playing information
         updateNowPlaying(track);

@@ -49,8 +49,8 @@ app.get('/music/:filename', (req, res) => {
             // 解析 Range 头
             const parts = range.replace(/bytes=/, '').split('-');
             const start = parseInt(parts[0], 10);
-            // 使用 1MB 作为默认 chunk 大小，优化流媒体传输
-            const CHUNK_SIZE = 1024 * 1024; // 1MB
+            // 使用 256KB 作为默认 chunk 大小，加快首次响应速度
+            const CHUNK_SIZE = 256 * 1024; // 256KB - 慢网速下更快开始播放
             const end = parts[1]
                 ? parseInt(parts[1], 10)
                 : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
