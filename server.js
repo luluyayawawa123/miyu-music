@@ -448,7 +448,7 @@ function formatFileSize(bytes) {
 
 // 辅助函数：格式化时长
 function formatDuration(seconds) {
-    if (!seconds) return '0:00';
+    if (!seconds || seconds <= 0 || !isFinite(seconds)) return '未知';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return mins + ':' + secs.toString().padStart(2, '0');
