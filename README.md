@@ -29,7 +29,27 @@
 npm install
 ```
 
-### 2. 使用 PM2 启动 (推荐)
+### 2. 安装 FFmpeg（推荐）
+
+FFmpeg 用于支持 iOS 设备流式播放 M4A、WAV 等格式。**如果只在 PC 端使用，可以跳过此步骤。**
+
+**Ubuntu / Debian:**
+```bash
+sudo apt update
+sudo apt install ffmpeg -y
+```
+
+**macOS (使用 Homebrew):**
+```bash
+brew install ffmpeg
+```
+
+验证安装：
+```bash
+ffmpeg -version
+```
+
+### 3. 使用 PM2 启动 (推荐)
 
 为了保证服务稳定运行并支持开机自启，建议使用 PM2 进行部署。
 

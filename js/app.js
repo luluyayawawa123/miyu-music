@@ -518,10 +518,189 @@
         }
     }
 
-    function playTrack(index) {
-        if (index < 0 || index >= playlist.length) return;
+    // === iOS/移动端检测 ===
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-        const track = playlist[index];
+    // 当前 HLS 实例（用于清理）
+    let currentHls = null;
+
+    // 判断是否需要使用 HLS 播放
+    function shouldUseHLS(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        // 只有 iOS 上的非 MP3 格式才使用 HLS
+        // MP3 和 OGG 在 iOS 上已经支持流式播放
+        const hlsFormats = ['m4a', 'wav', 'aac', 'flac'];
+        return isIOS && hlsFormats.includes(ext);
+    }
+
+    // HLS 播放函数（带轮询等待转码完成）
+    async function playHLSTrack(track, index) {
+        showLoadingState(true, '正在准备...');
+
+        // 清理之前的 HLS 实例
+        if (currentHls) {
+            currentHls.destroy();
+            currentHls = null;
+        }
+
+        const hlsUrl = `/hls/${encodeURIComponent(track.name)}`;
+        const statusUrl = `/hls-status/${encodeURIComponent(track.name)}`;
+
+        // Update UI immediately
+        updateNowPlaying(track);
+        document.querySelectorAll('#playlist-items li').forEach((li, i) => {
+            li.classList.toggle('active', i === index);
+        });
+
+        try {
+            // 首先请求 HLS，触发转码开始
+            const response = await fetch(hlsUrl);
+
+            if (response.status === 202) {
+                // 需要等待转码完成，开始轮询
+                console.log('HLS 转码中，开始轮询...');
+                showLoadingState(true, '正在转码...');
+
+                const success = await waitForTranscoding(track.name, statusUrl);
+                if (!success) {
+                    showLoadingState(true, '转码失败，请重试');
+                    setTimeout(() => showLoadingState(false), 2000);
+                    return;
+                }
+            } else if (!response.ok) {
+                throw new Error('HLS 请求失败');
+            }
+
+            // 转码完成，开始播放
+            playHLSStream(hlsUrl, track, index);
+
+        } catch (error) {
+            console.error('HLS 播放错误:', error);
+            showLoadingState(true, '加载失败，请重试');
+            setTimeout(() => showLoadingState(false), 2000);
+        }
+    }
+
+    // 轮询等待转码完成
+    async function waitForTranscoding(filename, statusUrl) {
+        const maxWaitTime = 5 * 60 * 1000; // 最多等待5分钟
+        const pollInterval = 2000; // 每2秒轮询一次
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWaitTime) {
+            try {
+                const response = await fetch(statusUrl);
+                const status = await response.json();
+
+                console.log('转码状态:', status);
+
+                if (status.status === 'done') {
+                    showLoadingState(true, '转码完成，正在加载...');
+                    return true;
+                } else if (status.status === 'error') {
+                    console.error('转码错误:', status.error);
+                    return false;
+                } else {
+                    // 还在转码中，更新进度显示
+                    const progress = status.progress || 0;
+                    showLoadingState(true, `转码中 ${progress}%...`);
+                }
+
+                // 等待后继续轮询
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+            } catch (error) {
+                console.error('轮询状态失败:', error);
+                // 继续尝试
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+            }
+        }
+
+        console.error('转码超时');
+        return false;
+    }
+
+    // 播放 HLS 流
+    function playHLSStream(hlsUrl, track, index) {
+        showLoadingState(true, '正在加载...');
+
+        // iOS Safari 原生支持 HLS
+        if (audioPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+            console.log('使用 iOS 原生 HLS 播放:', track.name);
+
+            const onCanPlay = () => {
+                showLoadingState(false);
+                // 确保从头开始播放
+                audioPlayer.currentTime = 0;
+                audioPlayer.play().catch(e => {
+                    console.error("HLS 播放失败:", e);
+                    showLoadingState(false);
+                });
+                audioPlayer.removeEventListener('canplay', onCanPlay);
+                audioPlayer.removeEventListener('error', onError);
+            };
+
+            const onError = (e) => {
+                console.error("HLS 加载失败:", e);
+                showLoadingState(true, '播放失败，请重试');
+                setTimeout(() => showLoadingState(false), 2000);
+                audioPlayer.removeEventListener('canplay', onCanPlay);
+                audioPlayer.removeEventListener('error', onError);
+            };
+
+            audioPlayer.addEventListener('canplay', onCanPlay);
+            audioPlayer.addEventListener('error', onError);
+
+            audioPlayer.src = hlsUrl;
+            audioPlayer.load();
+
+        } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            // 使用 HLS.js (其他浏览器)
+            console.log('使用 HLS.js 播放:', track.name);
+
+            currentHls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: false
+            });
+
+            currentHls.loadSource(hlsUrl);
+            currentHls.attachMedia(audioPlayer);
+
+            currentHls.on(Hls.Events.MANIFEST_PARSED, () => {
+                showLoadingState(false);
+                // 确保从头开始播放
+                audioPlayer.currentTime = 0;
+                audioPlayer.play().catch(e => console.error("HLS.js 播放失败:", e));
+            });
+
+            currentHls.on(Hls.Events.ERROR, (event, data) => {
+                console.error("HLS.js 错误:", data);
+                if (data.fatal) {
+                    showLoadingState(true, 'HLS 加载失败');
+                    setTimeout(() => showLoadingState(false), 2000);
+                }
+            });
+        } else {
+            // 不支持 HLS，回退到普通播放
+            console.log('HLS 不支持，使用普通播放');
+            playTrackNormal(track, index);
+            return;
+        }
+
+        // Initialize Web Audio API if not already done
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    }
+
+    // 普通播放函数（原 playTrack 逻辑）
+    function playTrackNormal(track, index) {
+        // 清理之前的 HLS 实例
+        if (currentHls) {
+            currentHls.destroy();
+            currentHls = null;
+        }
 
         // 显示加载状态
         showLoadingState(true, '正在加载...');
@@ -547,7 +726,7 @@
             clearTimeout(loadingTimeout);
         };
 
-        // 超时处理：30秒后如果还没加载好，给用户提示
+        // 超时处理：5秒后如果还没加载好，给用户提示
         const loadingTimeout = setTimeout(() => {
             showLoadingState(true, '网络较慢，请耐心等待...');
         }, 5000);
@@ -576,6 +755,22 @@
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
+    }
+
+    function playTrack(index) {
+        if (index < 0 || index >= playlist.length) return;
+
+        const track = playlist[index];
+
+        // 检测是否需要使用 HLS (iOS 上的 M4A/WAV 等格式)
+        if (shouldUseHLS(track.name)) {
+            console.log('iOS 检测到，使用 HLS 播放:', track.name);
+            playHLSTrack(track, index);
+            return;
+        }
+
+        // 使用普通播放
+        playTrackNormal(track, index);
     }
 
     // Update the now playing information

@@ -85,7 +85,7 @@
                         <label for="music-file-input" class="upload-button">
                             <i class="bi bi-music-note-beamed"></i> 添加音乐
                         </label>
-                        <input type="file" id="music-file-input" accept=".mp3,.wav,.ogg,.m4a" multiple>
+                        <input type="file" id="music-file-input" accept=".mp3,.wav,.ogg,.m4a,.flac,.aac" multiple>
                     </div>
                 </div>
             </section>
@@ -105,6 +105,8 @@
         </footer>
     </div>
 
+    <!-- HLS.js 用于非原生 HLS 支持的浏览器 -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script src="js/app.js"></script>
     <script src="js/stars.js"></script>
     <script src="js/audio-visualizer.js"></script>

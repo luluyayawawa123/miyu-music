@@ -3,6 +3,7 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const mm = require('music-metadata');
+const { spawn } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || 3337;
@@ -127,6 +128,236 @@ const musicDir = path.join(__dirname, 'music');
 if (!fs.existsSync(musicDir)) {
     fs.mkdirSync(musicDir, { recursive: true });
 }
+
+// HLS 缓存目录
+const hlsCacheDir = path.join(musicDir, '.hls-cache');
+if (!fs.existsSync(hlsCacheDir)) {
+    fs.mkdirSync(hlsCacheDir, { recursive: true });
+}
+
+// 清理过期的 HLS 缓存（服务器启动时）
+const HLS_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24小时
+function cleanHlsCache() {
+    try {
+        if (!fs.existsSync(hlsCacheDir)) return;
+        const now = Date.now();
+        const dirs = fs.readdirSync(hlsCacheDir);
+        for (const dir of dirs) {
+            const dirPath = path.join(hlsCacheDir, dir);
+            const stat = fs.statSync(dirPath);
+            if (stat.isDirectory() && (now - stat.mtimeMs) > HLS_CACHE_MAX_AGE) {
+                fs.rmSync(dirPath, { recursive: true, force: true });
+                console.log(`已清理过期 HLS 缓存: ${dir}`);
+            }
+        }
+    } catch (err) {
+        console.error('清理 HLS 缓存失败:', err);
+    }
+}
+cleanHlsCache();
+
+// --- HLS 流媒体路由 (用于 iOS Safari) ---
+// 将 M4A/WAV 等格式实时转码为 HLS 流
+// 使用异步转码 + 状态轮询模式，避免 HTTP 超时
+
+// 跟踪正在进行的转码任务
+const transcodingTasks = new Map(); // filename -> { status: 'pending'|'transcoding'|'done'|'error', progress: 0-100, error: null }
+
+// 启动转码任务（异步，不阻塞）
+function startTranscoding(filename, filePath, cacheDir, playlistPath) {
+    // 标记开始转码
+    transcodingTasks.set(filename, { status: 'transcoding', progress: 0, error: null });
+
+    console.log(`开始 HLS 转码: ${filename}`);
+
+    // 计算 HLS 分段的 URL 前缀
+    // 分段文件将通过 /hls/:filename/:segment 路由访问
+    const hlsBaseUrl = `/hls/${encodeURIComponent(filename)}/`;
+
+    const ffmpeg = spawn('ffmpeg', [
+        '-i', filePath,
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-hls_time', '10',
+        '-hls_list_size', '0',
+        '-hls_segment_filename', path.join(cacheDir, 'segment%03d.ts'),
+        '-hls_base_url', hlsBaseUrl,  // 设置分段文件的URL前缀
+        '-progress', 'pipe:1',
+        playlistPath
+    ]);
+
+    let ffmpegOutput = '';
+
+    // 解析进度
+    ffmpeg.stdout.on('data', (data) => {
+        const output = data.toString();
+        const match = output.match(/out_time_ms=(\d+)/);
+        if (match) {
+            const task = transcodingTasks.get(filename);
+            if (task) {
+                task.progress = Math.min(99, task.progress + 5);
+            }
+        }
+    });
+
+    ffmpeg.stderr.on('data', (data) => {
+        ffmpegOutput += data.toString();
+    });
+
+    ffmpeg.on('close', (code) => {
+        if (code === 0) {
+            console.log(`HLS 转码完成: ${filename}`);
+
+            // 验证 m3u8 文件内容（调试用）
+            try {
+                const m3u8Content = fs.readFileSync(playlistPath, 'utf8');
+                console.log(`M3U8 内容预览:\n${m3u8Content.substring(0, 500)}`);
+            } catch (e) { }
+
+            transcodingTasks.set(filename, { status: 'done', progress: 100, error: null });
+        } else {
+            console.error(`FFmpeg 转码失败 (${filename}):`, ffmpegOutput);
+            transcodingTasks.set(filename, { status: 'error', progress: 0, error: 'FFmpeg 转码失败' });
+            try {
+                fs.rmSync(cacheDir, { recursive: true, force: true });
+            } catch (e) { }
+        }
+    });
+
+    ffmpeg.on('error', (err) => {
+        console.error('FFmpeg 启动失败:', err);
+        transcodingTasks.set(filename, { status: 'error', progress: 0, error: 'FFmpeg 无法启动' });
+    });
+}
+
+// HLS 状态检查 API
+app.get('/hls-status/:filename', (req, res) => {
+    try {
+        const filename = decodeURIComponent(req.params.filename);
+        const safeFilename = filename.replace(/[^a-zA-Z0-9\u4e00-\u9fa5._-]/g, '_');
+        const cacheDir = path.join(hlsCacheDir, safeFilename);
+        const playlistPath = path.join(cacheDir, 'playlist.m3u8');
+
+        // 检查是否已有完成的缓存
+        if (fs.existsSync(playlistPath)) {
+            return res.json({ status: 'done', progress: 100 });
+        }
+
+        // 检查转码状态
+        const task = transcodingTasks.get(filename);
+        if (task) {
+            return res.json(task);
+        }
+
+        // 没有转码任务，返回未开始状态
+        return res.json({ status: 'pending', progress: 0 });
+    } catch (error) {
+        console.error('HLS 状态检查错误:', error);
+        res.status(500).json({ status: 'error', error: '服务器错误' });
+    }
+});
+
+// HLS 主请求路由
+app.get('/hls/:filename', (req, res) => {
+    try {
+        const filename = decodeURIComponent(req.params.filename);
+        const filePath = path.join(musicDir, filename);
+
+        // 检查源文件是否存在
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: '音频文件不存在' });
+        }
+
+        // 为每个文件创建独立的缓存目录
+        const safeFilename = filename.replace(/[^a-zA-Z0-9\u4e00-\u9fa5._-]/g, '_');
+        const cacheDir = path.join(hlsCacheDir, safeFilename);
+        const playlistPath = path.join(cacheDir, 'playlist.m3u8');
+
+        // 检查是否已有缓存的 HLS 文件
+        if (fs.existsSync(playlistPath)) {
+            // 更新缓存目录的修改时间（延长缓存有效期）
+            const now = new Date();
+            try { fs.utimesSync(cacheDir, now, now); } catch (e) { }
+
+            res.set({
+                'Content-Type': 'application/vnd.apple.mpegurl',
+                'Cache-Control': 'no-cache'
+            });
+            return res.sendFile(playlistPath);
+        }
+
+        // 检查是否正在转码
+        const task = transcodingTasks.get(filename);
+        if (task) {
+            if (task.status === 'transcoding') {
+                // 正在转码，告诉客户端等待
+                return res.status(202).json({
+                    status: 'transcoding',
+                    progress: task.progress,
+                    message: '正在转码，请稍候...'
+                });
+            } else if (task.status === 'error') {
+                // 转码失败，清除状态让用户可以重试
+                transcodingTasks.delete(filename);
+                return res.status(500).json({ error: task.error || 'HLS 转码失败' });
+            }
+            // status === 'done' 但文件不存在？重新转码
+        }
+
+        // 创建缓存目录
+        if (!fs.existsSync(cacheDir)) {
+            fs.mkdirSync(cacheDir, { recursive: true });
+        }
+
+        // 启动异步转码
+        startTranscoding(filename, filePath, cacheDir, playlistPath);
+
+        // 立即返回，告诉客户端转码已开始
+        return res.status(202).json({
+            status: 'transcoding',
+            progress: 0,
+            message: '开始转码...'
+        });
+
+    } catch (error) {
+        console.error('HLS 流处理错误:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ error: '服务器内部错误' });
+        }
+    }
+});
+
+// HLS 分段文件路由
+app.get('/hls/:filename/:segment', (req, res) => {
+    try {
+        const filename = decodeURIComponent(req.params.filename);
+        const segment = req.params.segment;
+
+        // 安全检查：确保 segment 只是文件名
+        if (segment.includes('/') || segment.includes('\\') || segment.includes('..')) {
+            return res.status(400).json({ error: '无效的请求' });
+        }
+
+        const safeFilename = filename.replace(/[^a-zA-Z0-9\u4e00-\u9fa5._-]/g, '_');
+        const segmentPath = path.join(hlsCacheDir, safeFilename, segment);
+
+        if (!fs.existsSync(segmentPath)) {
+            return res.status(404).json({ error: '分段文件不存在' });
+        }
+
+        res.set({
+            'Content-Type': 'video/MP2T',
+            'Cache-Control': 'public, max-age=31536000'
+        });
+        res.sendFile(segmentPath);
+
+    } catch (error) {
+        console.error('HLS 分段文件错误:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ error: '服务器内部错误' });
+        }
+    }
+});
 
 const playlistFile = path.join(musicDir, 'playlist.json');
 
