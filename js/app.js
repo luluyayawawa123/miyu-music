@@ -930,11 +930,20 @@
     });
 
     // 音频播放结束事件处理
-    audioPlayer.addEventListener('ended', () => {
+    // 用于跟踪是否已经处理过当前曲目的结束
+    let endHandledForCurrentTrack = false;
+
+    function handleTrackEnd() {
+        if (endHandledForCurrentTrack) return;
+        endHandledForCurrentTrack = true;
+
+        console.log('曲目播放结束, 当前模式:', playMode.repeat);
+
         // 根据不同的播放模式处理
         switch (playMode.repeat) {
             case 'one':
                 // 单曲循环：重新播放当前曲目
+                endHandledForCurrentTrack = false; // 允许再次触发
                 audioPlayer.currentTime = 0;
                 audioPlayer.play().catch(e => console.error("Error replaying audio:", e));
                 break;
@@ -951,6 +960,34 @@
                     playNext();
                 }
                 break;
+        }
+    }
+
+    // 标准的 ended 事件
+    audioPlayer.addEventListener('ended', () => {
+        handleTrackEnd();
+    });
+
+    // 用于 HLS 的备用检测：通过 timeupdate 检测播放是否结束
+    // iOS Safari 息屏时 ended 事件可能不触发，但 timeupdate 更可靠
+    audioPlayer.addEventListener('timeupdate', () => {
+        const duration = audioPlayer.duration;
+        const currentTime = audioPlayer.currentTime;
+
+        // 检查是否接近结束（最后 0.5 秒内且时间有效）
+        if (duration && currentTime && !isNaN(duration) && isFinite(duration)) {
+            if (duration - currentTime < 0.5 && duration > 1) {
+                // 接近结束，触发结束处理
+                handleTrackEnd();
+            }
+        }
+    });
+
+    // 当开始播放新曲目时重置标记
+    audioPlayer.addEventListener('play', () => {
+        // 如果 currentTime 接近 0，说明是新曲目
+        if (audioPlayer.currentTime < 1) {
+            endHandledForCurrentTrack = false;
         }
     });
 
