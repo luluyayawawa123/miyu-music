@@ -135,26 +135,104 @@ if (!fs.existsSync(hlsCacheDir)) {
     fs.mkdirSync(hlsCacheDir, { recursive: true });
 }
 
-// 清理过期的 HLS 缓存（服务器启动时）
-const HLS_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24小时
-function cleanHlsCache() {
+// 封面图缓存目录
+const coverCacheDir = path.join(musicDir, '.cover-cache');
+if (!fs.existsSync(coverCacheDir)) {
+    fs.mkdirSync(coverCacheDir, { recursive: true });
+}
+
+// 元数据缓存文件
+const metadataCacheFile = path.join(musicDir, '.metadata-cache.json');
+let metadataCache = {}; // 内存中的缓存 { filename: { title, artist, album, hasCover, mtime } }
+
+// 加载元数据缓存
+function loadMetadataCache() {
     try {
-        if (!fs.existsSync(hlsCacheDir)) return;
-        const now = Date.now();
-        const dirs = fs.readdirSync(hlsCacheDir);
-        for (const dir of dirs) {
-            const dirPath = path.join(hlsCacheDir, dir);
-            const stat = fs.statSync(dirPath);
-            if (stat.isDirectory() && (now - stat.mtimeMs) > HLS_CACHE_MAX_AGE) {
-                fs.rmSync(dirPath, { recursive: true, force: true });
-                console.log(`已清理过期 HLS 缓存: ${dir}`);
-            }
+        if (fs.existsSync(metadataCacheFile)) {
+            const data = fs.readFileSync(metadataCacheFile, 'utf8');
+            metadataCache = JSON.parse(data);
+            console.log(`已加载元数据缓存: ${Object.keys(metadataCache).length} 个文件`);
         }
     } catch (err) {
-        console.error('清理 HLS 缓存失败:', err);
+        console.error('加载元数据缓存失败:', err);
+        metadataCache = {};
     }
 }
-cleanHlsCache();
+
+// 保存元数据缓存（异步，不阻塞）
+function saveMetadataCache() {
+    fs.promises.writeFile(metadataCacheFile, JSON.stringify(metadataCache, null, 2), 'utf8')
+        .catch(err => console.error('保存元数据缓存失败:', err));
+}
+
+// 获取单个文件的元数据（优先从缓存读取）
+async function getFileMetadata(filename) {
+    const filePath = path.join(musicDir, filename);
+
+    try {
+        const stat = await fs.promises.stat(filePath);
+        const mtime = stat.mtimeMs;
+
+        // 检查缓存是否有效（文件未被修改）
+        if (metadataCache[filename] && metadataCache[filename].mtime === mtime) {
+            return metadataCache[filename];
+        }
+
+        // 缓存无效或不存在，重新解析
+        const metadata = await mm.parseFile(filePath);
+        const hasCover = metadata.common.picture && metadata.common.picture.length > 0;
+
+        const result = {
+            name: filename,
+            url: `/music/${encodeURIComponent(filename)}`,
+            title: metadata.common.title || filename,
+            artist: metadata.common.artist || '',
+            album: metadata.common.album || '',
+            hasCover: hasCover,
+            coverId: hasCover ? filename : null,
+            mtime: mtime
+        };
+
+        // 更新缓存
+        metadataCache[filename] = result;
+
+        return result;
+    } catch (error) {
+        console.error(`解析元数据失败 (${filename}):`, error);
+        return {
+            name: filename,
+            url: `/music/${encodeURIComponent(filename)}`,
+            title: filename,
+            hasCover: false,
+            mtime: 0
+        };
+    }
+}
+
+// 从缓存中删除文件的元数据
+function removeFromMetadataCache(filename) {
+    if (metadataCache[filename]) {
+        delete metadataCache[filename];
+        saveMetadataCache();
+    }
+}
+
+// 删除封面缓存
+function removeCoverCache(filename) {
+    const safeFilename = filename.replace(/[^a-zA-Z0-9\u4e00-\u9fa5._-]/g, '_');
+    const coverPath = path.join(coverCacheDir, safeFilename + '.jpg');
+    if (fs.existsSync(coverPath)) {
+        try {
+            fs.unlinkSync(coverPath);
+            console.log(`已删除封面缓存: ${safeFilename}`);
+        } catch (e) { }
+    }
+}
+
+// 启动时加载缓存
+loadMetadataCache();
+
+// HLS 缓存永久保留，只在删除源文件时清理对应缓存
 
 // --- HLS 流媒体路由 (用于 iOS Safari) ---
 // 将 M4A/WAV 等格式实时转码为 HLS 流
@@ -489,36 +567,15 @@ app.get('/api/music', async (req, res) => {
             sortedFiles.sort((a, b) => b.mtime - a.mtime);
         }
 
-        // Process each file to get metadata (using sorted list)
-        // Extract names from sorted objects
+        // Process each file to get metadata (using cache)
         const musicFiles = sortedFiles.map(f => f.name);
 
-        const tracksWithMetadata = await Promise.all(musicFiles.map(async (file) => {
-            const filePath = path.join(musicDir, file);
-            try {
-                // Use parseFile on the path
-                const metadata = await mm.parseFile(filePath);
-                const hasCover = metadata.common.picture && metadata.common.picture.length > 0;
+        const tracksWithMetadata = await Promise.all(
+            musicFiles.map(filename => getFileMetadata(filename))
+        );
 
-                return {
-                    name: file,
-                    url: `/music/${encodeURIComponent(file)}`,
-                    title: metadata.common.title || file,
-                    artist: metadata.common.artist || '',
-                    album: metadata.common.album || '',
-                    hasCover: hasCover,
-                    coverId: hasCover ? file : null
-                };
-            } catch (error) {
-                console.error(`Error parsing metadata for ${file}:`, error);
-                return {
-                    name: file,
-                    url: `/music/${encodeURIComponent(file)}`,
-                    title: file,
-                    hasCover: false
-                };
-            }
-        }));
+        // 保存缓存（异步，不阻塞响应）
+        saveMetadataCache();
 
         res.json(tracksWithMetadata);
     } catch (err) {
@@ -543,12 +600,26 @@ app.post('/api/playlist/order', async (req, res) => {
     }
 });
 
-// GET: Get cover art for a specific track
+// GET: Get cover art for a specific track (with caching)
 app.get('/api/cover/:trackId', async (req, res) => {
     try {
         const trackId = decodeURIComponent(req.params.trackId);
         const filePath = path.join(musicDir, trackId);
 
+        // 生成缓存文件名
+        const safeFilename = trackId.replace(/[^a-zA-Z0-9\u4e00-\u9fa5._-]/g, '_');
+        const coverCachePath = path.join(coverCacheDir, safeFilename + '.jpg');
+
+        // 检查缓存是否存在
+        if (fs.existsSync(coverCachePath)) {
+            res.set({
+                'Content-Type': 'image/jpeg',
+                'Cache-Control': 'public, max-age=31536000' // 缓存1年
+            });
+            return res.sendFile(coverCachePath);
+        }
+
+        // 缓存不存在，从音频文件提取
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({ error: '找不到文件' });
         }
@@ -560,7 +631,16 @@ app.get('/api/cover/:trackId', async (req, res) => {
         }
 
         const picture = metadata.common.picture[0];
-        res.set('Content-Type', picture.format);
+
+        // 保存到缓存（异步，不阻塞响应）
+        fs.promises.writeFile(coverCachePath, picture.data)
+            .then(() => console.log(`已缓存封面: ${safeFilename}`))
+            .catch(err => console.error(`缓存封面失败:`, err));
+
+        res.set({
+            'Content-Type': picture.format,
+            'Cache-Control': 'public, max-age=31536000'
+        });
         res.send(picture.data);
     } catch (error) {
         console.error("Error extracting cover art:", error);
@@ -707,6 +787,24 @@ app.delete('/api/music/:fileName', verifyPassword, (req, res) => {
 
         // 删除文件
         fs.unlinkSync(filePath);
+
+        // 同时删除对应的 HLS 缓存
+        const safeFilename = fileName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5._-]/g, '_');
+        const hlsCachePath = path.join(hlsCacheDir, safeFilename);
+        if (fs.existsSync(hlsCachePath)) {
+            try {
+                fs.rmSync(hlsCachePath, { recursive: true, force: true });
+                console.log(`已删除 HLS 缓存: ${safeFilename}`);
+            } catch (e) {
+                console.error(`删除 HLS 缓存失败: ${safeFilename}`, e);
+            }
+        }
+
+        // 删除元数据缓存
+        removeFromMetadataCache(fileName);
+
+        // 删除封面缓存
+        removeCoverCache(fileName);
 
         res.json({
             success: true,
