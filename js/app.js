@@ -114,6 +114,45 @@
             playlist.length = 0; // Clear local playlist
             serverPlaylist.forEach(track => playlist.push(track));
             renderPlaylist();
+
+            // 检查URL参数，自动播放指定歌曲（用于分享链接）
+            const urlParams = new URLSearchParams(window.location.search);
+            const playParam = urlParams.get('play');
+            const errorParam = urlParams.get('error');
+
+            // 处理错误参数
+            if (errorParam) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+                if (errorParam === 'link_expired') {
+                    showToast('分享链接已失效', true);
+                } else if (errorParam === 'song_deleted') {
+                    showToast('该歌曲已被删除', true);
+                }
+            }
+
+            if (playParam) {
+                const targetTrackIndex = playlist.findIndex(t => t.name === playParam);
+                if (targetTrackIndex !== -1) {
+                    const track = playlist[targetTrackIndex];
+                    // 清除URL参数
+                    window.history.replaceState({}, document.title, window.location.pathname);
+
+                    // 尝试自动播放，如果被浏览器阻止则显示点击播放提示
+                    setTimeout(() => {
+                        playTrack(targetTrackIndex);
+
+                        // 检测播放是否被阻止，延迟检查
+                        setTimeout(() => {
+                            if (audioPlayer.paused) {
+                                showAutoplayPrompt(targetTrackIndex, track.title || track.name);
+                            }
+                        }, 500);
+                    }, 100);
+                } else {
+                    showToast('未找到指定的歌曲', true);
+                }
+            }
+
             if (playlist.length > 0 && !audioPlayer.src) {
                 // Auto-play first track is commented out to avoid autoplay restrictions
                 // playTrack(0);
@@ -122,6 +161,30 @@
             console.error("Error loading playlist from server:", error);
             alert("无法从服务器加载音乐列表。请确保后端服务已启动。");
         }
+    }
+
+    // 显示自动播放提示（当浏览器阻止自动播放时）
+    function showAutoplayPrompt(trackIndex, trackTitle) {
+        // 移除已有的提示
+        const existingPrompt = document.querySelector('.autoplay-prompt-overlay');
+        if (existingPrompt) existingPrompt.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'autoplay-prompt-overlay';
+        overlay.innerHTML = `
+            <div class="autoplay-prompt">
+                <div class="autoplay-icon"><i class="bi bi-play-circle-fill"></i></div>
+                <div class="autoplay-text">点击播放</div>
+                <div class="autoplay-track">${trackTitle}</div>
+            </div>
+        `;
+
+        overlay.addEventListener('click', () => {
+            overlay.remove();
+            audioPlayer.play().catch(e => console.error('播放失败:', e));
+        });
+
+        document.body.appendChild(overlay);
     }
 
     // 创建上传进度条UI
@@ -274,6 +337,87 @@
         }
     }
 
+    // 分享歌曲（复制短链接URL）
+    async function shareTrack(fileName, displayTitle) {
+        try {
+            // 从服务器获取短链接ID
+            const response = await fetch(`/api/share/${encodeURIComponent(fileName)}`);
+            if (!response.ok) {
+                throw new Error('获取分享链接失败');
+            }
+            const data = await response.json();
+
+            // 构建短链接URL
+            const shareUrl = `${window.location.origin}${data.shortUrl}`;
+
+            // 复制到剪贴板
+            await copyToClipboard(shareUrl);
+            showToast(`已复制"${displayTitle}"的分享链接`);
+        } catch (error) {
+            console.error('分享失败:', error);
+            showToast('分享失败，请重试', true);
+        }
+    }
+
+    // 复制文本到剪贴板（带降级方案）
+    async function copyToClipboard(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch (err) {
+            // 降级方案
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+        }
+    }
+
+    // Toast 提示函数
+    function showToast(message, isError = false) {
+        const existingToast = document.querySelector('.share-toast');
+        if (existingToast) existingToast.remove();
+
+        const toast = document.createElement('div');
+        toast.className = 'share-toast' + (isError ? ' error' : '');
+        toast.innerHTML = `<i class="bi ${isError ? 'bi-exclamation-circle' : 'bi-check-circle'}"></i><span>${message}</span>`;
+        document.body.appendChild(toast);
+
+        requestAnimationFrame(() => toast.classList.add('show'));
+
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // 展开/收起更多按钮
+    function toggleExpandedButtons(listItem) {
+        const wasExpanded = listItem.classList.contains('buttons-expanded');
+
+        // 先收起所有其他展开的项
+        document.querySelectorAll('#playlist-items li.buttons-expanded').forEach(li => {
+            li.classList.remove('buttons-expanded');
+        });
+
+        // 切换当前项
+        if (!wasExpanded) {
+            listItem.classList.add('buttons-expanded');
+        }
+    }
+
+    // 点击其他区域时收起展开的按钮
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.track-buttons')) {
+            document.querySelectorAll('#playlist-items li.buttons-expanded').forEach(li => {
+                li.classList.remove('buttons-expanded');
+            });
+        }
+    });
+
     // === 拖拽排序相关变量 ===
     let draggedItemIndex = null;
 
@@ -329,41 +473,76 @@
             artistSpan.className = 'track-artist';
             artistSpan.textContent = track.artist || '';
 
-            // Create download button/link
+            // === 可折叠按钮布局 ===
+            const buttonsContainer = document.createElement('div');
+            buttonsContainer.className = 'track-buttons';
+
+            // 下载按钮（始终可见）
             const downloadLink = document.createElement('a');
-            downloadLink.href = track.url; // URL from server (e.g., /music/song.mp3)
+            downloadLink.href = track.url;
             downloadLink.innerHTML = '<i class="bi bi-cloud-download"></i>';
             downloadLink.setAttribute('title', '下载 ' + track.name);
-            downloadLink.setAttribute('download', track.name); // Suggests filename to browser
-            downloadLink.className = 'download-button'; // For styling
-            // Prevent click on download button from also triggering playTrack
+            downloadLink.setAttribute('download', track.name);
+            downloadLink.className = 'download-button';
             downloadLink.addEventListener('click', (event) => {
                 event.stopPropagation();
             });
 
-            // 创建信息按钮
+            // 更多按钮（展开/收起）
+            const moreButton = document.createElement('button');
+            moreButton.innerHTML = '<i class="bi bi-three-dots"></i>';
+            moreButton.className = 'more-button';
+            moreButton.setAttribute('title', '更多操作');
+            moreButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                toggleExpandedButtons(listItem);
+            });
+
+            // 可展开的按钮容器
+            const expandedButtons = document.createElement('div');
+            expandedButtons.className = 'expanded-buttons';
+
+            // 信息按钮
             const infoButton = document.createElement('button');
             infoButton.innerHTML = '<i class="bi bi-info-circle"></i>';
-            infoButton.className = 'info-button';
+            infoButton.className = 'action-button info-button';
             infoButton.setAttribute('title', '查看音频信息');
             infoButton.addEventListener('click', (event) => {
-                event.stopPropagation(); // 防止触发播放
+                event.stopPropagation();
                 showAudioInfo(track.name);
             });
 
-            // 创建删除按钮
+            // 分享按钮
+            const shareButton = document.createElement('button');
+            shareButton.innerHTML = '<i class="bi bi-share"></i>';
+            shareButton.className = 'action-button share-button';
+            shareButton.setAttribute('title', '分享 ' + (track.title || track.name));
+            shareButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                shareTrack(track.name, track.title || track.name);
+            });
+
+            // 删除按钮
             const deleteButton = document.createElement('button');
             deleteButton.innerHTML = '<i class="bi bi-trash"></i>';
-            deleteButton.className = 'delete-button';
+            deleteButton.className = 'action-button delete-button';
             deleteButton.setAttribute('title', '删除 ' + track.name);
             deleteButton.addEventListener('click', (event) => {
-                event.stopPropagation(); // 防止触发播放
-
-                // 确认是否删除
+                event.stopPropagation();
                 if (confirm(`确定要删除 "${track.title || track.name}" 吗？`)) {
                     deleteTrack(track.name);
                 }
             });
+
+            // 组装展开的按钮
+            expandedButtons.appendChild(infoButton);
+            expandedButtons.appendChild(shareButton);
+            expandedButtons.appendChild(deleteButton);
+
+            // 组装按钮容器
+            buttonsContainer.appendChild(downloadLink);
+            buttonsContainer.appendChild(moreButton);
+            buttonsContainer.appendChild(expandedButtons);
 
             // Assemble all components
             trackDetailsContainer.appendChild(trackNameSpan);
@@ -371,9 +550,7 @@
 
             trackInfoContainer.appendChild(thumbnailContainer);
             trackInfoContainer.appendChild(trackDetailsContainer);
-            trackInfoContainer.appendChild(downloadLink);
-            trackInfoContainer.appendChild(infoButton);
-            trackInfoContainer.appendChild(deleteButton);
+            trackInfoContainer.appendChild(buttonsContainer);
             listItem.appendChild(trackInfoContainer);
 
             listItem.addEventListener('click', () => {

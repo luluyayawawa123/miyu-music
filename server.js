@@ -229,8 +229,87 @@ function removeCoverCache(filename) {
     }
 }
 
+// === 分享短链接 ID 管理 ===
+const shareIdsFile = path.join(musicDir, '.share-ids.json');
+let shareIds = {
+    idToFile: {},  // shortId -> filename
+    fileToId: {}   // filename -> shortId
+};
+
+// 生成随机短ID (6位字母数字混合)
+function generateShortId() {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789'; // 排除容易混淆的字符 0,1,l,o
+    let id = '';
+    for (let i = 0; i < 6; i++) {
+        id += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return id;
+}
+
+// 加载分享ID映射
+function loadShareIds() {
+    try {
+        if (fs.existsSync(shareIdsFile)) {
+            const data = fs.readFileSync(shareIdsFile, 'utf8');
+            shareIds = JSON.parse(data);
+            // 确保结构完整
+            if (!shareIds.idToFile) shareIds.idToFile = {};
+            if (!shareIds.fileToId) shareIds.fileToId = {};
+            console.log(`已加载分享ID: ${Object.keys(shareIds.idToFile).length} 个`);
+        }
+    } catch (err) {
+        console.error('加载分享ID失败:', err);
+        shareIds = { idToFile: {}, fileToId: {} };
+    }
+}
+
+// 保存分享ID映射（异步）
+function saveShareIds() {
+    fs.promises.writeFile(shareIdsFile, JSON.stringify(shareIds, null, 2), 'utf8')
+        .catch(err => console.error('保存分享ID失败:', err));
+}
+
+// 获取或创建文件的分享ID
+function getOrCreateShareId(filename) {
+    // 如果已有ID，直接返回
+    if (shareIds.fileToId[filename]) {
+        return shareIds.fileToId[filename];
+    }
+
+    // 生成新ID，确保唯一
+    let newId;
+    do {
+        newId = generateShortId();
+    } while (shareIds.idToFile[newId]);
+
+    // 保存映射
+    shareIds.idToFile[newId] = filename;
+    shareIds.fileToId[filename] = newId;
+    saveShareIds();
+
+    console.log(`为 ${filename} 生成分享ID: ${newId}`);
+    return newId;
+}
+
+// 根据短ID获取文件名
+function getFileByShareId(shortId) {
+    return shareIds.idToFile[shortId] || null;
+}
+
+// 删除文件的分享ID
+function removeShareId(filename) {
+    const shortId = shareIds.fileToId[filename];
+    if (shortId) {
+        delete shareIds.idToFile[shortId];
+        delete shareIds.fileToId[filename];
+        saveShareIds();
+        console.log(`已删除分享ID: ${shortId} (${filename})`);
+    }
+}
+
 // 启动时加载缓存
 loadMetadataCache();
+loadShareIds();
 
 // HLS 缓存永久保留，只在删除源文件时清理对应缓存
 
@@ -449,6 +528,53 @@ const verifyPassword = (req, res, next) => {
 
     next();
 };
+
+// === 分享短链接路由 ===
+// 短链接重定向：/s/:shortId -> /?play=filename
+app.get('/s/:shortId', (req, res) => {
+    const shortId = req.params.shortId;
+    const filename = getFileByShareId(shortId);
+
+    if (!filename) {
+        // 短链接无效，重定向到首页并显示错误
+        return res.redirect('/?error=link_expired');
+    }
+
+    // 检查文件是否还存在
+    const filePath = path.join(musicDir, filename);
+    if (!fs.existsSync(filePath)) {
+        // 文件已删除，清理无效的分享ID
+        removeShareId(filename);
+        return res.redirect('/?error=song_deleted');
+    }
+
+    // 重定向到带有 play 参数的主页
+    res.redirect(`/?play=${encodeURIComponent(filename)}`);
+});
+
+// API: 获取歌曲的分享短ID
+app.get('/api/share/:filename', (req, res) => {
+    try {
+        const filename = decodeURIComponent(req.params.filename);
+        const filePath = path.join(musicDir, filename);
+
+        // 检查文件是否存在
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: '文件不存在' });
+        }
+
+        // 获取或创建分享ID
+        const shortId = getOrCreateShareId(filename);
+
+        res.json({
+            shortId: shortId,
+            shortUrl: `/s/${shortId}`
+        });
+    } catch (error) {
+        console.error('获取分享ID错误:', error);
+        res.status(500).json({ error: '服务器错误' });
+    }
+});
 
 // --- Multer Setup for File Uploads ---
 const storage = multer.diskStorage({
@@ -805,6 +931,9 @@ app.delete('/api/music/:fileName', verifyPassword, (req, res) => {
 
         // 删除封面缓存
         removeCoverCache(fileName);
+
+        // 删除分享短链接ID
+        removeShareId(fileName);
 
         res.json({
             success: true,
