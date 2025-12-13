@@ -4,16 +4,22 @@ const fs = require('fs');
 const path = require('path');
 const mm = require('music-metadata');
 const { spawn } = require('child_process');
+const { statsMiddleware, getStats } = require('./stats-middleware');
 
 const app = express();
 const PORT = process.env.PORT || 3337;
 // 设置系统密码，实际应用中应存储加密后的密码并使用更安全的方式
 const SYSTEM_PASSWORD = 'miyu2024';
+// 统计系统独立密码
+const STATS_PASSWORD = 'lu123456789';
 
 // --- Middleware ---
 // 启用 JSON 请求体解析
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// 访问统计中间件
+app.use(statsMiddleware);
 
 // --- 自定义音频流媒体路由 (必须在静态文件服务之前) ---
 // 这个路由优化了MP3等格式的流媒体传输，解决慢网速下缓冲时间过长的问题
@@ -45,16 +51,29 @@ app.get('/music/:filename', (req, res) => {
 
         // 处理 Range 请求（分块传输）
         const range = req.headers.range;
+        const userAgent = req.headers['user-agent'] || '';
+        const isAndroid = /Android/i.test(userAgent);
 
         if (range) {
             // 解析 Range 头
             const parts = range.replace(/bytes=/, '').split('-');
             const start = parseInt(parts[0], 10);
-            // 使用 256KB 作为默认 chunk 大小，加快首次响应速度
-            const CHUNK_SIZE = 256 * 1024; // 256KB - 慢网速下更快开始播放
-            const end = parts[1]
-                ? parseInt(parts[1], 10)
-                : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
+
+            // 安卓设备兼容性策略：让浏览器自主控制Range
+            // PC/iOS：使用256KB chunk优化（快速启播）
+            let end;
+            if (isAndroid) {
+                // 安卓：尊重浏览器请求的范围，不强制限制
+                end = parts[1]
+                    ? parseInt(parts[1], 10)
+                    : fileSize - 1;
+            } else {
+                // PC/iOS：保持256KB chunk优化
+                const CHUNK_SIZE = 256 * 1024; // 256KB - 慢网速下更快开始播放
+                end = parts[1]
+                    ? parseInt(parts[1], 10)
+                    : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
+            }
 
             // 验证 Range 有效性
             if (start >= fileSize || end >= fileSize || start > end) {
@@ -73,7 +92,8 @@ app.get('/music/:filename', (req, res) => {
                 'Content-Length': chunkSize,
                 'Content-Type': contentType,
                 'Cache-Control': 'public, max-age=31536000', // 缓存1年
-                'X-Content-Duration': stat.size // 帮助某些播放器快速获取时长
+                'X-Content-Duration': stat.size, // 帮助某些播放器快速获取时长
+                'X-Chunk-Strategy': isAndroid ? 'browser-controlled' : 'server-256kb' // 调试用
             });
 
             // 创建文件流并传输
@@ -610,6 +630,68 @@ const upload = multer({
         } else {
             cb(new Error('仅支持上传音频文件!'), false);
         }
+    }
+});
+
+// --- 统计系统路由 ---
+
+// GET: 统计页面
+app.get('/stats', (req, res) => {
+    try {
+        const statsHtmlPath = path.join(__dirname, 'stats.html');
+        if (fs.existsSync(statsHtmlPath)) {
+            res.sendFile(statsHtmlPath);
+        } else {
+            res.status(404).send('统计页面未找到');
+        }
+    } catch (error) {
+        console.error('加载统计页面错误:', error);
+        res.status(500).send('服务器错误');
+    }
+});
+
+// POST: 统计系统密码验证
+app.post('/api/stats/verify', (req, res) => {
+    const { password } = req.body;
+
+    if (password === STATS_PASSWORD) {
+        res.json({ verified: true });
+    } else {
+        res.status(401).json({ verified: false, error: '密码错误' });
+    }
+});
+
+// GET: 获取统计数据（需要密码）
+app.post('/api/stats/data', (req, res) => {
+    const { password } = req.body;
+
+    if (password !== STATS_PASSWORD) {
+        return res.status(401).json({ error: '密码错误' });
+    }
+
+    try {
+        const stats = getStats();
+        res.json(stats);
+    } catch (error) {
+        console.error('获取统计数据错误:', error);
+        res.status(500).json({ error: '无法获取统计数据' });
+    }
+});
+
+// POST: 解析短链接ID到文件名（用于统计显示）
+app.post('/api/stats/resolve-share', (req, res) => {
+    const { password, shortId } = req.body;
+
+    if (password !== STATS_PASSWORD) {
+        return res.status(401).json({ error: '密码错误' });
+    }
+
+    try {
+        const filename = getFileByShareId(shortId);
+        res.json({ shortId, filename });
+    } catch (error) {
+        console.error('解析短链接错误:', error);
+        res.status(500).json({ error: '无法解析短链接' });
     }
 });
 

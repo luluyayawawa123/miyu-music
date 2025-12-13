@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据统计 - 葱豆的音乐网站</title>
+    <link rel="icon" href="favicon.png" type="image/png">
+    <link rel="stylesheet" href="css/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/stats.css">
+</head>
+
+<body>
+    <div class="content-wrapper">
+        <header>
+            <h1>数据统计</h1>
+            <a href="/" class="back-link"><i class="bi bi-arrow-left"></i> 返回主页</a>
+        </header>
+
+        <!-- 密码验证界面 -->
+        <div id="login-section">
+            <div class="login-card">
+                <div class="lock-icon">
+                    <i class="bi bi-lock-fill"></i>
+                </div>
+                <h2>请输入统计密码</h2>
+                <div class="password-input-wrapper">
+                    <input type="password" id="stats-password" placeholder="输入密码">
+                    <button id="login-btn">登录</button>
+                </div>
+                <div id="error-message" class="error-message"></div>
+            </div>
+        </div>
+
+        <!-- 统计数据展示界面 -->
+        <div id="stats-section" style="display: none;">
+            <!-- 自动刷新控制 -->
+            <div class="refresh-control">
+                <label class="refresh-toggle">
+                    <input type="checkbox" id="auto-refresh">
+                    <span>自动刷新 (30秒)</span>
+                </label>
+                <button id="manual-refresh" class="refresh-btn" title="立即刷新">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+                <span id="last-update" class="last-update"></span>
+            </div>
+
+            <main>
+                <!-- 今日概览 -->
+                <section class="stats-overview">
+                    <div class="stats-card">
+                        <div class="stats-icon pv-icon">
+                            <i class="bi bi-eye-fill"></i>
+                        </div>
+                        <div class="stats-content">
+                            <div class="stats-label">今日访问量</div>
+                            <div class="stats-value" id="today-pv">-</div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <div class="stats-icon uv-icon">
+                            <i class="bi bi-people-fill"></i>
+                        </div>
+                        <div class="stats-content">
+                            <div class="stats-label">今日独立访客</div>
+                            <div class="stats-value" id="today-uv">-</div>
+                        </div>
+                    </div>
+
+                    <div class="stats-card">
+                        <div class="stats-icon total-icon">
+                            <i class="bi bi-bar-chart-fill"></i>
+                        </div>
+                        <div class="stats-content">
+                            <div class="stats-label">总记录数</div>
+                            <div class="stats-value" id="total-logs">-</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 24小时访问时段分布 -->
+                <section class="hour-distribution-section">
+                    <h2>今日访问时段分布</h2>
+                    <div class="hour-chart-container">
+                        <canvas id="hour-chart"></canvas>
+                    </div>
+                </section>
+
+                <!-- 页面访问排行 -->
+                <section class="top-pages-section">
+                    <h2>页面访问排行 Top 10</h2>
+                    <div class="top-pages-list" id="top-pages-list">
+                        <!-- 动态插入 -->
+                    </div>
+                </section>
+
+                <!-- 设备和浏览器统计 -->
+                <section class="device-browser-section">
+                    <div class="stats-row">
+                        <div class="stats-col">
+                            <h2>设备分布</h2>
+                            <div class="stat-bars" id="device-stats">
+                                <!-- 动态插入 -->
+                            </div>
+                        </div>
+                        <div class="stats-col">
+                            <h2>浏览器分布</h2>
+                            <div class="stat-bars" id="browser-stats">
+                                <!-- 动态插入 -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 7日趋势 -->
+                <section class="trends-section">
+                    <h2>近7日趋势</h2>
+                    <div class="chart-container">
+                        <canvas id="trends-chart"></canvas>
+                    </div>
+                    <div class="trends-table">
+                        <table id="trends-table">
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>访问量(PV)</th>
+                                    <th>独立访客(UV)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trends-tbody">
+                                <!-- 数据将动态插入 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- 最近访问记录 -->
+                <section class="recent-access-section">
+                    <h2>最近访问记录</h2>
+                    <div class="access-list" id="recent-access-list">
+                        <!-- 数据将动态插入 -->
+                    </div>
+                </section>
+            </main>
+
+            <footer>
+                <p>&copy; 2024 葱豆SAMA - 统计系统</p>
+            </footer>
+        </div>
+    </div>
+
+    <script src="js/stats-client.js"></script>
+</body>
+
+</html>

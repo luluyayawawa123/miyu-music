@@ -271,7 +271,7 @@
                         setTimeout(() => {
                             progressBar.close();
                             const result = JSON.parse(xhr.responseText);
-                            alert(result.message || `${files.length} 个文件处理完毕。`);
+                            showToast(result.message || `${files.length} 个文件处理完毕。`);
                             loadPlaylistFromServer();
                         }, 500);
                     } else {
@@ -327,7 +327,7 @@
                 throw new Error(result.error || '删除文件失败');
             }
 
-            alert(result.message || `文件已成功删除`);
+            showToast(result.message || `文件已成功删除`);
             await loadPlaylistFromServer(); // 刷新播放列表
             return true;
         } catch (error) {
@@ -340,19 +340,42 @@
     // 分享歌曲（复制短链接URL）
     async function shareTrack(fileName, displayTitle) {
         try {
-            // 从服务器获取短链接ID
-            const response = await fetch(`/api/share/${encodeURIComponent(fileName)}`);
-            if (!response.ok) {
-                throw new Error('获取分享链接失败');
+            // 针对 iOS Safari: 必须在用户手势中立即发起剪贴板写入
+            // 使用 ClipboardItem 包含一个 Promise，异步获取数据在 Promise 内部完成
+            if (navigator.clipboard && navigator.clipboard.write) {
+                const clipboardItem = new ClipboardItem({
+                    'text/plain': (async () => {
+                        // 从服务器获取短链接ID
+                        const response = await fetch(`/api/share/${encodeURIComponent(fileName)}`);
+                        if (!response.ok) {
+                            throw new Error('获取分享链接失败');
+                        }
+                        const data = await response.json();
+
+                        // 构建短链接URL
+                        const shareUrl = `${window.location.origin}${data.shortUrl}`;
+
+                        // 返回 Blob 格式的数据
+                        return new Blob([shareUrl], { type: 'text/plain' });
+                    })()
+                });
+
+                // 立即写入剪贴板（Promise 会在内部解析）
+                await navigator.clipboard.write([clipboardItem]);
+                showToast('已复制分享链接');
+            } else {
+                // 降级方案：用于不支持 ClipboardItem 的旧浏览器
+                const response = await fetch(`/api/share/${encodeURIComponent(fileName)}`);
+                if (!response.ok) {
+                    throw new Error('获取分享链接失败');
+                }
+                const data = await response.json();
+                const shareUrl = `${window.location.origin}${data.shortUrl}`;
+
+                // 使用现有的降级方法
+                await copyToClipboard(shareUrl);
+                showToast('已复制分享链接');
             }
-            const data = await response.json();
-
-            // 构建短链接URL
-            const shareUrl = `${window.location.origin}${data.shortUrl}`;
-
-            // 复制到剪贴板
-            await copyToClipboard(shareUrl);
-            showToast(`已复制"${displayTitle}"的分享链接`);
         } catch (error) {
             console.error('分享失败:', error);
             showToast('分享失败，请重试', true);
@@ -695,8 +718,9 @@
         }
     }
 
-    // === iOS/移动端检测 ===
+    // === 设备检测 ===
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isAndroid = /Android/i.test(navigator.userAgent);
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
     // 当前 HLS 实例（用于清理）
@@ -1189,6 +1213,26 @@
     // 暴露全局函数供自定义播放器使用
     window.playNext = playNext;
     window.playPrevious = playPrevious;
+
+    // === 显示设备信息（调试用） ===
+    const deviceInfoEl = document.getElementById('device-info');
+    if (deviceInfoEl) {
+        let deviceType = '未知设备';
+        const ua = navigator.userAgent;
+
+        if (isAndroid) {
+            deviceType = 'Android 设备';
+        } else if (isIOS) {
+            deviceType = 'iOS 设备';
+        } else if (/Windows NT/i.test(ua)) {
+            deviceType = 'Windows PC';
+        } else if (/Macintosh|Mac OS X/i.test(ua)) {
+            deviceType = 'Mac 设备';
+        } else if (/Linux/i.test(ua)) {
+            deviceType = 'Linux 设备';
+        }
+
+        // 添加分隔符以适应单行布局
+        deviceInfoEl.textContent = ` | 设备: ${deviceType} | `;
+    }
 });
-
-
